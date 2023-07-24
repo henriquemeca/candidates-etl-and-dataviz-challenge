@@ -1,17 +1,14 @@
-import os
-
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.types import DateType, IntegerType, StringType
 
-from postgres_params import PostgresParams
+from postgres_conector import PostgresConnector
 from spark.spark_client import spark_session
 
 
 class CandidatesETL:
     table = "candidates"
     mode = "overwrite"
-
     schema = {
         "First Name": StringType(),
         "Last Name": StringType(),
@@ -29,26 +26,28 @@ class CandidatesETL:
         return spark.read.csv(path="./data/candidates.csv", sep=";", header=True)
 
     def transform(self, candidates_df: DataFrame) -> DataFrame:
-        for field_name, field_type in self.schema.items():
+        for field_name, field_types in self.schema.items():
             candidates_df = candidates_df.withColumn(
-                field_name, col(field_name).cast(field_type)
+                field_name, col(field_name).cast(field_types)
             )
         return candidates_df
 
     def load(self, candidates_df: DataFrame) -> None:
+        postgres_connector = PostgresConnector()
+
         candidates_df.write.jdbc(
-            url=f"jdbc:postgresql://localhost/{PostgresParams.database_name}",
+            url=f"jdbc:postgresql://localhost/{postgres_connector.database}",
             table=self.table,
             mode=self.mode,
             properties={
-                "user": PostgresParams.user,
-                "password": PostgresParams.password,
+                "user": postgres_connector.user,
+                "password": postgres_connector.password,
             },
         )
 
-    def execute(self) -> None:
-        with spark_session("candidates-etl") as spark:
-            candidates_df = self.transform(self.read(spark))
+    def execute(self):
+        with spark_session(app_name="candidates_etl") as spark:
+            candidates_df = self.transform(self.read(spark=spark))
             self.load(candidates_df)
 
 
