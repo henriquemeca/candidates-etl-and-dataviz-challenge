@@ -1,54 +1,56 @@
 import os
 
-from dotenv import load_dotenv
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import col
-from pyspark.sql.types import DateType, IntegerType
+from pyspark.sql.types import DateType, IntegerType, StringType
 
-# Initialize a Spark Session
-spark = (
-    SparkSession.builder.config(
-        "spark.driver.extraClassPath", "./spark/jars/postgresql-42.5.4.jar"
-    )
-    .appName("candidates-csv")
-    .master("local")
-    .getOrCreate()
-)
-
-# Load CSV file into DataFrame
-df = (
-    spark.read.format("csv")
-    .option("header", "true")
-    .option("delimiter", ";")
-    .load("./data/candidates.csv")
-)
-df.show()
-df.printSchema()
-schema = {
-    "Application Date": DateType,
-    "YOE": IntegerType,
-    "Code Challenge Score": IntegerType,
-    "Technical Interview Score": IntegerType,
-}
-for field_name, field_type in schema.items():
-    df = df.withColumn(field_name, col(field_name).cast(field_type()))
-df.show()
-df.printSchema()
+from postgres_params import PostgresParams
+from spark.spark_client import spark_session
 
 
-# Configure PostgreSQL connection
-database = "main"
-table = "candidates"
-user = "admin"
-password = os.getenv("POSTGRES_PASSWORD")
-url = "localhost"
+class CandidatesETL:
+    table = "candidates"
+    mode = "overwrite"
 
-# Write the DataFrame to the PostgreSQL table
-df.write.format("jdbc").option("url", f"jdbc:postgresql://localhost/{database}").mode(
-    "overwrite"
-).option("dbtable", table).option("user", user).option("password", password).save()
-# .option(
-#     "url", f"jdbc:postgresql://localhost/{database}"
-# ).option("dbtable", table).option("user", user).option("password", password).option(
-#     "driver", "org.postgresql.Driver"
-# ).save()
+    schema = {
+        "First Name": StringType(),
+        "Last Name": StringType(),
+        "Email": StringType(),
+        "Application Date": DateType(),
+        "Country": StringType(),
+        "YOE": IntegerType(),
+        "Seniority": StringType(),
+        "Technology": StringType(),
+        "Code Challenge Score": IntegerType(),
+        "Technical Interview Score": IntegerType(),
+    }
+
+    def read(self, spark: SparkSession) -> DataFrame:
+        return spark.read.csv(path="./data/candidates.csv", sep=";", header=True)
+
+    def transform(self, candidates_df: DataFrame) -> DataFrame:
+        for field_name, field_type in self.schema.items():
+            candidates_df = candidates_df.withColumn(
+                field_name, col(field_name).cast(field_type)
+            )
+        return candidates_df
+
+    def load(self, candidates_df: DataFrame) -> None:
+        candidates_df.write.jdbc(
+            url=f"jdbc:postgresql://localhost/{PostgresParams.database_name}",
+            table=self.table,
+            mode=self.mode,
+            properties={
+                "user": PostgresParams.user,
+                "password": PostgresParams.password,
+            },
+        )
+
+    def execute(self) -> None:
+        with spark_session("candidates-etl") as spark:
+            candidates_df = self.transform(self.read(spark))
+            self.load(candidates_df)
+
+
+if __name__ == "__main__":
+    CandidatesETL().execute()
