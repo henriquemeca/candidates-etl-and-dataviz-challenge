@@ -7,6 +7,7 @@ from spark.spark_client import spark_session
 
 
 class CandidatesETL:
+    "Reads data from a candidates csv file and loads it to a postgres database"
     table = "candidates"
     mode = "overwrite"
     schema = {
@@ -23,9 +24,11 @@ class CandidatesETL:
     }
 
     def read(self, spark: SparkSession) -> DataFrame:
+        "Read data from a csv file"
         return spark.read.csv(path="./data/candidates.csv", sep=";", header=True)
 
     def transform(self, candidates_df: DataFrame) -> DataFrame:
+        "Enforce columns data types"
         for field_name, field_types in self.schema.items():
             candidates_df = candidates_df.withColumn(
                 field_name, col(field_name).cast(field_types)
@@ -33,6 +36,7 @@ class CandidatesETL:
         return candidates_df
 
     def load(self, candidates_df: DataFrame) -> None:
+        "Loads data to a postgres database"
         postgres_connector = PostgresConnector()
 
         candidates_df.write.jdbc(
@@ -46,6 +50,7 @@ class CandidatesETL:
         )
 
     def execute(self):
+        "Executes the ETL pipeline"
         with spark_session(app_name="candidates_etl") as spark:
             candidates_df = self.transform(self.read(spark=spark))
             self.load(candidates_df)
